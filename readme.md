@@ -33,7 +33,7 @@ flaskCapstone/
 ```
 
 ## Project API Documentation
-[API Documentation](api_documentation.md)
+[API Documentation](API_Documentation.md)
 
 ## Installation and Setup
 
