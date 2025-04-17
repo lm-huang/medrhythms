@@ -16,8 +16,6 @@ export const kitService = {
   getAllKits: async () => {
     try {
       const response = await api.get("/kits/getAll");
-      console.log("后端返回的原始Kit数据:", response.data);
-
       return response.data.map((kit) => ({
         ...kit,
         // Process distributor information: priority is distributor_name > distributor.name > distributor (string)
@@ -32,6 +30,15 @@ export const kitService = {
         dispense_date: kit.dispense_date || kit.start_time || null,
         // Ensure consistent case for status field
         status: kit.status || "Unknown",
+        // Map all components
+        components: {
+          phone: kit.phone || null,
+          sim_card: kit.sim_card || null,
+          right_sensor: kit.right_sensor || null,
+          left_sensor: kit.left_sensor || null,
+          headphone: kit.headphone || null,
+          box: kit.box || null,
+        },
       }));
     } catch (error) {
       throw kitService.handleError(error);
@@ -93,28 +100,80 @@ export const kitService = {
   // Create a new kit
   createKit: async (components) => {
     try {
-      const response = await api.post("/kits/create", {
+      // Prepare request data matching backend API requirements
+      const requestData = {
         phone_ID: components.phone?.id,
         SIM_card_ID: components.simCard?.id,
         right_sensor_ID: components.rightSensor?.id,
         left_sensor_ID: components.leftSensor?.id,
         headphones_ID: components.headphone?.id,
-      });
+        box_ID: components.box?.id,
+      };
+
+      console.log("Sending create kit request:", requestData);
+      const response = await api.post("/kits/create", requestData);
+      console.log("Create kit response:", response.data);
+
       return response.data;
     } catch (error) {
-      throw kitService.handleError(error);
+      console.error("Error creating kit:", error.response?.data || error);
+
+      if (error.response?.data) {
+        // Handle specific error cases
+        if (error.response.data.unavailable_components) {
+          throw {
+            message:
+              error.response.data.message ||
+              "Some components are not available",
+            details: error.response.data.unavailable_components,
+            response: error.response,
+          };
+        }
+
+        throw {
+          message: error.response.data.message || "Failed to create kit",
+          details: error.response.data.details || error.response.data,
+          response: error.response,
+        };
+      }
+
+      throw {
+        message: "Failed to create kit",
+        details: error.message,
+      };
     }
   },
 
   // Disassemble a kit
-  disassembleKit: async (kitId) => {
+  disassembleKit: async (data) => {
     try {
-      const response = await api.post("/kits/disassemble", {
-        kit_ID: kitId,
-      });
+      const response = await api.post("/kits/disassemble", data);
       return response.data;
     } catch (error) {
-      throw kitService.handleError(error);
+      if (error.response) {
+        throw {
+          message: error.response.data.message || "Failed to disassemble kit",
+          response: error.response,
+        };
+      }
+      throw error;
+    }
+  },
+
+  // Batch disassemble kits
+  disassembleKits: async (data) => {
+    try {
+      const response = await api.post("/kits/disassemble_many", data);
+      return response.data;
+    } catch (error) {
+      if (error.response) {
+        throw {
+          message:
+            error.response.data.message || "Failed to batch disassemble kits",
+          response: error.response,
+        };
+      }
+      throw error;
     }
   },
 
@@ -236,68 +295,62 @@ export const kitService = {
   },
 
   // Distribute kits to a distributor
-  distributeKits: async (distributeData) => {
+  distributeKits: async (data) => {
     try {
-      console.log("Calling API to distribute kits:", distributeData);
+      // Ensure required fields are present
+      if (!data.kits || !Array.isArray(data.kits)) {
+        throw new Error("Missing required field: kits");
+      }
+      if (!data.distributor_id) {
+        throw new Error("Missing required field: distributor_id");
+      }
 
-      // Convert parameter names to match backend expected format
-      const backendData = {
-        kits: distributeData.kit_ids, // Change to 'kits'
-        distributor_id: distributeData.distributor_id,
-        // If there is a date, convert to ISO 8601 format
-        start_time: distributeData.distribute_date
-          ? new Date(distributeData.distribute_date).toISOString()
+      // Format the date to ISO 8601 format if provided
+      const requestData = {
+        kits: data.kits,
+        distributor_id: data.distributor_id,
+        start_time: data.distribute_date
+          ? data.distribute_date.toISOString()
           : undefined,
       };
 
-      console.log("转换后的请求数据:", backendData);
-
-      const response = await api.post("/kits/distribute", backendData);
-      console.log("API distribute response:", response);
-
-      // If distribution is successful, update local Kit data to correctly display distributor and distribution date
-      if (response.data && response.status === 200) {
-        // Optionally fetch all Kit data here
-        console.log("分发成功，开始获取更新后的Kit数据");
-      }
-
+      // Send POST request to distribute kits
+      const response = await api.post("/kits/distribute", requestData);
       return response.data;
     } catch (error) {
-      console.error("Error in distributeKits API call:", error);
+      console.error("Error distributing kits:", error);
       if (error.response) {
-        console.error("Response error data:", error.response.data);
-        console.error("Response status:", error.response.status);
+        // Handle specific error messages from backend
+        throw {
+          message: error.response.data.message || "Failed to distribute kits",
+          response: error.response,
+        };
       }
-      throw kitService.handleError(error);
+      throw error;
     }
   },
 
   // Collect kits from distributor
-  collectKits: async (collectData) => {
+  collectKits: async (data) => {
     try {
-      console.log("Calling API to collect kits:", collectData);
+      // Ensure required fields are present
+      if (!data.kits || !Array.isArray(data.kits)) {
+        throw new Error("Missing required field: kits");
+      }
 
-      // Convert parameter names to match backend expected format
-      const backendData = {
-        kits: collectData.kit_ids, // Ensure using 'kits' as parameter name
-        endTime: collectData.end_time // Ensure using 'endTime' as parameter name
-          ? new Date(collectData.end_time).toISOString()
-          : undefined,
-      };
-
-      console.log("转换后的请求数据:", backendData);
-
-      const response = await api.patch("/kits/collect", backendData);
-      console.log("API collect response:", response);
-
+      // Send PATCH request to collect kits
+      const response = await api.patch("/kits/collect", data);
       return response.data;
     } catch (error) {
-      console.error("Error in collectKits API call:", error);
+      console.error("Error collecting kits:", error);
       if (error.response) {
-        console.error("Response error data:", error.response.data);
-        console.error("Response status:", error.response.status);
+        // Handle specific error messages from backend
+        throw {
+          message: error.response.data.message || "Failed to collect kits",
+          response: error.response,
+        };
       }
-      throw kitService.handleError(error);
+      throw error;
     }
   },
 

@@ -21,6 +21,8 @@ import {
   FormControl,
   InputLabel,
   Alert,
+  Paper,
+  Grid,
 } from "@mui/material";
 import { DataGrid } from "@mui/x-data-grid";
 import {
@@ -30,6 +32,7 @@ import {
   Business as BusinessIcon,
   Send as SendIcon,
   AssignmentReturn as CollectIcon,
+  Clear as ClearIcon,
 } from "@mui/icons-material";
 import { AdapterMoment } from "@mui/x-date-pickers/AdapterMoment";
 import { LocalizationProvider } from "@mui/x-date-pickers/LocalizationProvider";
@@ -40,9 +43,9 @@ import { kitService, distributorService } from "../services/api";
 function KitList() {
   const [searchKitId, setSearchKitId] = useState("");
   const [searchStatus, setSearchStatus] = useState("");
+  const [selectedDistributors, setSelectedDistributors] = useState([]);
   const [startDate, setStartDate] = useState(null);
   const [endDate, setEndDate] = useState(null);
-  const [selectedDistributors, setSelectedDistributors] = useState([]);
   const [selectedKit, setSelectedKit] = useState(null);
   const [confirmDialog, setConfirmDialog] = useState(false);
   const [filteredData, setFilteredData] = useState([]);
@@ -95,15 +98,20 @@ function KitList() {
         id: String(kit.id),
       }));
 
+      // Filter kits to only include Available, In-use, and Used status
       const filteredKits = processedData.filter(
-        (kit) => kit.status.toLowerCase() !== "furbishing"
+        (kit) =>
+          kit.status.toLowerCase() === "available" ||
+          kit.status.toLowerCase() === "in-use" ||
+          kit.status.toLowerCase() === "used"
       );
-      console.log("Filtered Kits (excluding furbishing status):", filteredKits);
+      console.log("Filtered Kits:", filteredKits);
 
       // Set filtered data
       setFilteredData(filteredKits);
     } catch (error) {
-      setErrorWithTimeout(error.message);
+      console.error("Error fetching kits:", error);
+      setErrorWithTimeout(error.message || "Failed to fetch kits");
     } finally {
       setLoading(false);
     }
@@ -111,15 +119,24 @@ function KitList() {
 
   const fetchDistributors = async () => {
     try {
-      setDistributorLoading(true);
       const data = await distributorService.getAllDistributors();
-      setDistributors(data || []);
+      // Filter distributors to only include active ones
+      const activeDistributors = data.filter(
+        (distributor) => distributor.status === "active"
+      );
+      setDistributors(activeDistributors);
     } catch (error) {
-      console.error("Error fetching distributors:", error);
-    } finally {
-      setDistributorLoading(false);
+      setErrorWithTimeout(error.message || "Failed to fetch distributors");
     }
   };
+
+  // Available status options for dropdown
+  const statusOptions = [
+    { value: "", label: "All Status" },
+    { value: "available", label: "Available" },
+    { value: "in-use", label: "In-use" },
+    { value: "used", label: "Used" },
+  ];
 
   const handleSearch = async () => {
     try {
@@ -156,11 +173,13 @@ function KitList() {
         );
       }
 
-      // Filter out kits with status 'furbishing'
+      // Filter kits to only include Available, In-use, and Used status
       results = results.filter(
-        (kit) => kit.status.toLowerCase() !== "furbishing"
+        (kit) =>
+          kit.status.toLowerCase() === "available" ||
+          kit.status.toLowerCase() === "in-use" ||
+          kit.status.toLowerCase() === "used"
       );
-      console.log("results without furbishing status:", results);
 
       setFilteredData(results);
     } catch (error) {
@@ -215,8 +234,9 @@ function KitList() {
 
       const kitIdsToDistribute = selectedKits.map((id) => String(id));
 
+      // Verify all selected kits are in Available status
       const allAvailable = kitIdsToDistribute.every((kitId) => {
-        const kit = filteredData.find((k) => String(k.id) === kitId);
+        const kit = filteredData.find((k) => String(k.id) === String(kitId));
         return (
           kit && (kit.status === "Available" || kit.status === "available")
         );
@@ -230,27 +250,20 @@ function KitList() {
         return;
       }
 
+      // Format the date to ISO 8601 format if provided
       let formattedDate = undefined;
       if (distributeDate) {
         formattedDate = distributeDate.toISOString();
-        console.log("format data:", formattedDate);
       }
 
-      console.log("preparing distributing kits:", {
-        kits: kitIdsToDistribute,
-        distributor_id: selectedDistributor,
-        distribute_date: formattedDate || "current time",
-      });
-
-      // Create request data object
+      // Create request data object matching backend API requirements
       const requestData = {
         kits: kitIdsToDistribute,
         distributor_id: selectedDistributor,
-        distribute_date: formattedDate,
+        start_time: formattedDate,
       };
 
       const result = await kitService.distributeKits(requestData);
-      console.log("Distribution result:", result);
 
       if (result && result.message) {
         setSuccessMessageWithTimeout(
@@ -268,8 +281,11 @@ function KitList() {
         );
       }
     } catch (error) {
-      console.error("Error when distributing kits:", error);
-      setErrorWithTimeout(error.message || "Failed to distribute kits");
+      if (error.response?.data?.message) {
+        setErrorWithTimeout(error.response.data.message);
+      } else {
+        setErrorWithTimeout(error.message || "Failed to distribute kits");
+      }
     } finally {
       setLoading(false);
     }
@@ -293,7 +309,7 @@ function KitList() {
       setLoading(true);
       setError(null);
 
-      // verify again if all selected kits are in a collectable state
+      // Verify again if all selected kits are in a collectable state
       const allInUse = collectKits.every((kitId) => {
         const kit = filteredData.find((k) => String(k.id) === String(kitId));
         return kit && kit.status === "In-use";
@@ -307,15 +323,21 @@ function KitList() {
         return;
       }
 
+      // Format the date to ISO 8601 format
+      const formattedDate = collectDate.toISOString();
       console.log("Preparing to collect kits:", {
         kits: collectKits,
-        endTime: collectDate.toISOString(),
+        endTime: formattedDate,
       });
 
-      const result = await kitService.collectKits({
+      // Create request data object matching backend API requirements
+      const requestData = {
         kits: collectKits,
-        endTime: collectDate.toISOString(),
-      });
+        endTime: formattedDate,
+      };
+
+      const result = await kitService.collectKits(requestData);
+      console.log("Collection result:", result);
 
       if (result && result.message) {
         setSuccessMessageWithTimeout(
@@ -332,8 +354,13 @@ function KitList() {
         );
       }
     } catch (error) {
-      console.error("Error when collecting kit:", error);
-      setErrorWithTimeout(error.message || "Failed to collect kits");
+      console.error("Error when collecting kits:", error);
+      // Handle specific error messages from backend
+      if (error.response?.data?.message) {
+        setErrorWithTimeout(error.response.data.message);
+      } else {
+        setErrorWithTimeout(error.message || "Failed to collect kits");
+      }
     } finally {
       setLoading(false);
     }
@@ -429,48 +456,6 @@ function KitList() {
       },
     },
     {
-      field: "dispense_date",
-      headerName: "Distribute Date",
-      flex: 1,
-      renderCell: (params) => {
-        console.log("Rendering distribution date information:", params.row);
-
-        // First try to get from dispense_date field
-        let dateValue = params.row.dispense_date;
-
-        // If no dispense_date, try other possible fields
-        if (!dateValue) {
-          dateValue = params.row.start_time || params.row.distribute_date;
-        }
-
-        // If status is "In-use" or "Used" but no date found, try using created_at as fallback
-        if (
-          !dateValue &&
-          (params.row.status === "In-use" ||
-            params.row.status === "Bound" ||
-            params.row.status === "Used")
-        ) {
-          dateValue = params.row.created_at;
-        }
-
-        if (!dateValue) return "-";
-
-        try {
-          let formattedDate = moment(dateValue).format("YYYY-MM-DD HH:mm:ss");
-
-          // Add additional style for "Used" status
-          if (params.row.status === "Used") {
-            return <Box sx={{ opacity: 0.7 }}>{formattedDate}</Box>;
-          }
-
-          return formattedDate;
-        } catch (error) {
-          console.error("Date formatting error:", error);
-          return "-";
-        }
-      },
-    },
-    {
       field: "actions",
       headerName: "Actions",
       flex: 1,
@@ -541,9 +526,6 @@ function KitList() {
 
       // Handle batch disassembly
       if (selectedKit?.batchDissemble && selectedKit.batchIds?.length > 0) {
-        let successCount = 0;
-        let failedCount = 0;
-
         // Verify all kit statuses one final time
         const invalidKits = selectedKit.batchIds.filter((kitId) => {
           const kit = filteredData.find((k) => String(k.id) === String(kitId));
@@ -565,34 +547,38 @@ function KitList() {
           return;
         }
 
-        // Disassemble all selected kits one by one
-        for (const kitId of selectedKit.batchIds) {
-          try {
-            const result = await kitService.disassembleKit(kitId);
-            if (result.message === "Kit disassembled successfully") {
-              successCount++;
-            } else {
-              failedCount++;
-            }
-          } catch (error) {
-            console.error(`Error dissembling kit ${kitId}:`, error);
-            failedCount++;
-          }
-        }
+        // Prepare request data for batch disassembly
+        const requestData = {
+          kit_IDs: selectedKit.batchIds.map((id) => String(id)),
+        };
 
-        if (successCount > 0) {
-          setSuccessMessageWithTimeout(
-            `Successfully disassembled ${successCount} kit${
-              successCount !== 1 ? "s" : ""
-            }${failedCount > 0 ? ` (${failedCount} failed)` : ""}`
-          );
-        } else {
-          setErrorWithTimeout(`Failed to disassemble any kits`);
+        const result = await kitService.disassembleKits(requestData);
+
+        if (result.message === "Batch disassemble completed") {
+          if (result.failed_kits && result.failed_kits.length > 0) {
+            setErrorWithTimeout(
+              `Some kits failed to disassemble: ${result.failed_kits
+                .map((f) => f.kit_ID)
+                .join(", ")}`
+            );
+          } else {
+            setSuccessMessageWithTimeout(
+              `Successfully disassembled ${selectedKit.batchIds.length} kit${
+                selectedKit.batchIds.length !== 1 ? "s" : ""
+              }`
+            );
+          }
         }
       }
       // Handle single disassembly
       else {
-        const result = await kitService.disassembleKit(selectedKit.id);
+        // Prepare request data for single disassembly
+        const requestData = {
+          kit_ID: String(selectedKit.id),
+        };
+
+        const result = await kitService.disassembleKit(requestData);
+
         if (result.message === "Kit disassembled successfully") {
           setSuccessMessageWithTimeout("Kit disassembled successfully");
         }
@@ -601,7 +587,11 @@ function KitList() {
       // Refresh the kit list
       fetchKits();
     } catch (error) {
-      setErrorWithTimeout(error.message);
+      if (error.response?.data?.message) {
+        setErrorWithTimeout(error.response.data.message);
+      } else {
+        setErrorWithTimeout(error.message || "Failed to disassemble kit(s)");
+      }
     } finally {
       setLoading(false);
       setConfirmDialog(false);
@@ -643,6 +633,15 @@ function KitList() {
     setSuccessTimeout(timeout);
   };
 
+  const handleClearFilters = () => {
+    setSearchKitId("");
+    setSearchStatus("");
+    setSelectedDistributors([]);
+    setStartDate(null);
+    setEndDate(null);
+    fetchKits();
+  };
+
   return (
     <LocalizationProvider dateAdapter={AdapterMoment}>
       <Box>
@@ -666,32 +665,27 @@ function KitList() {
                 endAdornment: <SearchIcon color="action" />,
               }}
             />
-            <TextField
-              label="Status"
-              variant="outlined"
-              size="small"
-              value={searchStatus}
-              onChange={(e) => setSearchStatus(e.target.value)}
-            />
-            <DatePicker
-              label="Start Date"
-              value={startDate}
-              onChange={setStartDate}
-              slotProps={{ textField: { size: "small" } }}
-            />
-            <DatePicker
-              label="End Date"
-              value={endDate}
-              onChange={setEndDate}
-              slotProps={{ textField: { size: "small" } }}
-            />
             <FormControl sx={{ minWidth: 200 }} size="small">
-              <InputLabel>Distributors</InputLabel>
+              <InputLabel>Status</InputLabel>
+              <Select
+                value={searchStatus}
+                onChange={(e) => setSearchStatus(e.target.value)}
+                label="Status"
+              >
+                {statusOptions.map((option) => (
+                  <MenuItem key={option.value} value={option.value}>
+                    {option.label}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+            <FormControl sx={{ minWidth: 200 }} size="small">
+              <InputLabel>Distributor</InputLabel>
               <Select
                 multiple
                 value={selectedDistributors}
                 onChange={(e) => setSelectedDistributors(e.target.value)}
-                input={<OutlinedInput label="Distributors" />}
+                input={<OutlinedInput label="Distributor" />}
                 renderValue={(selected) =>
                   selected
                     .map((id) => distributors.find((d) => d.id === id)?.name)
@@ -710,6 +704,18 @@ function KitList() {
                 ))}
               </Select>
             </FormControl>
+            <DatePicker
+              label="Start Date"
+              value={startDate}
+              onChange={setStartDate}
+              slotProps={{ textField: { size: "small" } }}
+            />
+            <DatePicker
+              label="End Date"
+              value={endDate}
+              onChange={setEndDate}
+              slotProps={{ textField: { size: "small" } }}
+            />
             <Button
               variant="contained"
               onClick={handleSearch}
@@ -717,6 +723,14 @@ function KitList() {
               sx={{ height: 40 }}
             >
               Search
+            </Button>
+            <Button
+              variant="outlined"
+              onClick={handleClearFilters}
+              startIcon={<ClearIcon />}
+              sx={{ height: 40 }}
+            >
+              Clear
             </Button>
           </Stack>
         </Card>
