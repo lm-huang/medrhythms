@@ -68,16 +68,23 @@ def get_kits_by_date_range():
     try:
         start_date = datetime.strptime(request.args.get('startDate'), '%Y-%m-%d')
         end_date = datetime.strptime(request.args.get('endDate'), '%Y-%m-%d')
-        
+        if start_date > end_date:
+            return jsonify({
+                'message': 'Invalid date range: startDate must be earlier than endDate'
+            }), 400
+
         kits = Kit.query.filter(
-            Kit.created_at.between(start_date, end_date)
+            Kit.created_at.between(start_date, end_date),
+            Kit.status.in_(["Available", "In-use", "Used"])
         ).all()
-        
+
         return jsonify([{
             'id': kit.id,
-            'created_at': kit.created_at,
+            'created_at': kit.created_at.isoformat(),
             'status': kit.status,
-            'batch_number': kit.batch_number
+            'batch_number': 0000,
+            'distributor': kit.distributor_name if kit.distributor else None,
+            'dispense_date': kit.dispense_date.isoformat() if kit.dispense_date else None
         } for kit in kits]), 200
     except ValueError:
         return jsonify({'message': 'Invalid date format'}), 400

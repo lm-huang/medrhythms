@@ -40,7 +40,7 @@ def create_kit():
     """Create a kit with components chosen"""
     try:
         data = request.get_json()
-
+        print(data)
         # Define mapping
         required_components = {
             'phone_ID': Phone,
@@ -132,7 +132,7 @@ def disassemble_kit():
             ('headphone', kit.headphone),
             ('box', kit.box)
         ]
-        
+
         for component_type, component in components:
             if component:
                 component.status = 'refurbishing'
@@ -143,7 +143,7 @@ def disassemble_kit():
                     'status': component.status
                 })
         
-        kit.status = 'Furbishing'
+        kit.status = 'Scarped'
         
         db.session.commit()
         
@@ -193,6 +193,7 @@ def batch_disassemble_kit():
                 ('headphone', kit.headphone),
                 ('box', kit.box)
             ]
+            print(components)
 
             for component_type, component in components:
                 if component:
@@ -205,7 +206,7 @@ def batch_disassemble_kit():
                         'status': component.status
                     })
 
-            kit.status = 'Refurbishing'
+            kit.status = 'Scarped'
 
         # Commit all the changes
         db.session.commit()
